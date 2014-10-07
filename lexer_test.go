@@ -47,7 +47,7 @@ quux" "xy\
 zzy" 'what\
 ever'
 `)
-				Println(c.Eval("cr\r\nlf\\\r\n\"cr\\\r\nlf\""))
+				c.Eval("cr\r\nlf\\\r\n\"cr\\\r\nlf\"")
 				So(c.lines, ShouldResemble, [][]string{
 					{"Tony Halik", "Tony Halik", "Tony Halik", "Tony Halik"},
 					{"$tota#lly", "$what$0#\"ever'", "\"", "'"},
