@@ -26,12 +26,8 @@ const (
 	opSet
 	opAppend
 	opSetIfUnset
+	opDotCommand
 )
-
-type op struct {
-	kind opKind
-	name string
-}
 
 const eof = -1
 
@@ -48,7 +44,7 @@ type lexer struct {
 }
 
 func (l *lexer) parse() error {
-	for state := lexBOL; state != nil; {
+	for state := lexBOL; state != nil && l.err == nil; {
 		state = state(l)
 	}
 	return l.err
@@ -119,6 +115,14 @@ func (l *lexer) endLine() {
 		if l.Get(l.opName) == nil {
 			l.Set(l.opName, l.line...)
 		}
+	case opDotCommand:
+		if dot := l.dot[l.opName]; dot == nil {
+			l.errf("Unknown command .%s", l.opName)
+		} else {
+			l.err = dot(l.Config, l.line...)
+		}
+	default:
+		panic(fmt.Sprintf("Unrecognized op %d(%s)", l.op, l.opName))
 	}
 	l.opName = ""
 	l.op = opLine

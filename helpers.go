@@ -1,5 +1,6 @@
 package shlike
 
+import "fmt"
 import "strings"
 
 // Returns `str` escaped as a single configuration word
@@ -19,4 +20,25 @@ func EscapeLine(strs []string) string {
 		estrs[i] = Escape(str)
 	}
 	return strings.Join(estrs, " ")
+}
+
+func snakeToCamel(str string) string {
+	return strings.Replace(
+		strings.Title(
+			strings.Replace(strings.ToLower(str),
+				"_", " ", -1)),
+		" ", "", -1)
+}
+
+func recoverFrom(wrapped func() error) error {
+	ch := make(chan error, 1)
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				ch <- fmt.Errorf("Panicked: %v", r)
+			}
+		}()
+		ch <- wrapped()
+	}()
+	return <-ch
 }

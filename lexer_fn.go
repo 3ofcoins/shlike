@@ -96,7 +96,7 @@ func lexEOLByRx(l *lexer, _ string, _ []int) lexFn {
 }
 
 var lexBOL lexFn
-var rxBOL = regexp.MustCompile(`^\s*(?:([_\pL][_\pL\pN]*)[\t\v\f ]*([?+]?)=[\t\v\f ]*)?`)
+var rxBOL = regexp.MustCompile(`^\s*(?:([_\pL][_\pL\pN]*)[\t\v\f ]*([?+]?)=[\t\v\f ]*|\.([a-zA-Z_][a-zA-Z0-9_]+)[\t\v\f ]*)?`)
 
 func lexBOLByRx(l *lexer, region string, pos []int) lexFn {
 	if pos[0] >= 0 {
@@ -109,6 +109,9 @@ func lexBOLByRx(l *lexer, region string, pos []int) lexFn {
 		case "?":
 			l.op = opSetIfUnset
 		}
+	} else if pos[4] >= 0 {
+		l.op = opDotCommand
+		l.opName = region[pos[4]:pos[5]]
 	}
 	return lexDispatch
 }

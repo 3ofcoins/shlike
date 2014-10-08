@@ -110,9 +110,34 @@ QUUX = Quux
 			So(stderrFor(func() { c.Eval("$undef") }), ShouldEndWith, "WARNING: Undefined variable \"undef\"\n")
 		})
 
-		Convey("Debug function (for full coverage)", func() {
+		Convey("Calling dot-commands", func() {
+			Convey("Undefined command", func() {
+				err := c.Eval(`.undefined_command foo`)
+				So(err, ShouldNotBeNil)
+				So(err.Error(), ShouldContainSubstring, "Unknown command .undefined_command")
+			})
+			Convey("Failing command", func() {
+				So(c.Eval(`.include fixtures/nonexistent.conf`), ShouldNotBeNil)
+			})
+			Convey("Include command", func() {
+				c.Set("PGPASSWORD", "dupa.7")
+				c.Set("REDIS_PORT", "6380")
+				So(c.Eval(`.include fixtures/example.conf`), ShouldBeNil)
+				So(c.Get("PGPASSWORD"), ShouldResemble, []string{"dupa.8"})
+				So(c.Get("REDIS_PORT"), ShouldResemble, []string{"6380"})
+			})
+			Convey("Registering custom commands", func() {
+				So(c.Eval(`.ping`), ShouldNotBeNil)
+				c.Dot("ping", func(c *Config, _ ...string) error { c.Set("PING", "PONG"); return nil })
+				So(c.Eval(`.ping`), ShouldBeNil)
+				So(c.Get("PING"), ShouldResemble, []string{"PONG"})
+			})
+		})
+
+		Convey("Full coverage", func() {
 			l := c.lexer("", "")
 			So(stderrFor(func() { l.debug("foo") }), ShouldContainSubstring, "foo")
+			So(func() { l.op = opKind(-1); l.endLine() }, ShouldPanic)
 		})
 	})
 }

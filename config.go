@@ -11,11 +11,16 @@ import "strings"
 type Config struct {
 	variables map[string][]string
 	lines     [][]string
+	dot       map[string]DotCommand
 }
 
 // Returns new empty config object
 func NewConfig() *Config {
-	return &Config{map[string][]string{}, [][]string{}}
+	rv := &Config{map[string][]string{}, [][]string{}, map[string]DotCommand{}}
+	for name, handler := range DotCommands {
+		rv.dot[name] = handler
+	}
+	return rv
 }
 
 // Returns contents as string, escaped as a loadable config, fully
@@ -80,4 +85,12 @@ func (c *Config) Load(path string) error {
 		return err
 	}
 	return c.eval(path, string(config))
+}
+
+func (c *Config) Dot(name string, cmd DotCommand) {
+	if cmd == nil {
+		delete(c.dot, name)
+	} else {
+		c.dot[name] = cmd
+	}
 }
