@@ -1,5 +1,6 @@
 package shlike
 
+import "os"
 import "testing"
 import . "github.com/smartystreets/goconvey/convey"
 
@@ -13,7 +14,7 @@ func TestConfig(t *testing.T) {
 				cfg.Set("BAR", "baz")
 				cfg.Set("QUUX", "xyzzy", "barney")
 
-				So(cfg.variables, ShouldResemble, map[string][]string{
+				So(cfg.Vars, ShouldResemble, map[string][]string{
 					"FOO":  []string{},
 					"BAR":  []string{"baz"},
 					"QUUX": []string{"xyzzy", "barney"},
@@ -40,30 +41,46 @@ func TestConfig(t *testing.T) {
 			})
 		})
 
-		Convey("Can be loaded from a file", func() {
-			So(cfg.Load("fixtures/example.conf"), ShouldBeNil)
+		Convey("Line access", func() {
+			cfg.Eval("foo\nbar\nbaz")
+			So(cfg.Line(0), ShouldResemble, []string{"foo"})
+			So(cfg.Line(1), ShouldResemble, []string{"bar"})
+			So(cfg.Line(2), ShouldResemble, []string{"baz"})
+			So(cfg.Line(3), ShouldBeNil)
+		})
 
-			Convey("Will fail on loading errors", func() {
+		Convey("Load", func() {
+			So(cfg.Load("fixtures/example.conf"), ShouldBeNil)
+			So(cfg.Get("PGPASSWORD"), ShouldResemble, []string{"dupa.8"})
+
+			Convey("Returns error when appropriate", func() {
 				So(cfg.Load("fixtures/nonexistent.conf"), ShouldNotBeNil)
 			})
 		})
 
-		Convey("Serialization", func() {
+		Convey("Serialize", func() {
 			Convey("Works at all", func() {
-				cfg.Eval(`
-FOO = 1
-Tony Halik
-`)
-				So(cfg.String(), ShouldEqual, "FOO = 1\nTony Halik")
+				cfg.Eval("FOO = 1\nTony Halik")
+				So(cfg.Serialize(), ShouldEqual, "FOO = 1\nTony Halik")
 			})
 
-			Convey("Serialized config can be loaded back", func() {
+			Convey("Can be evaluated back", func() {
 				cfg.Load("fixtures/example.conf")
 				reloaded := NewConfig()
-				reloaded.Eval(cfg.String())
-				So(reloaded.variables, ShouldResemble, cfg.variables)
-				So(reloaded.lines, ShouldResemble, cfg.lines)
+				So(reloaded.Eval(cfg.Serialize()), ShouldBeNil)
+				So(reloaded.Vars, ShouldResemble, cfg.Vars)
+				So(reloaded.Lines, ShouldResemble, cfg.Lines)
 			})
+		})
+
+		Convey("Save", func() {
+			os.MkdirAll("tmp", 0700)
+			cfg.Load("fixtures/example.conf")
+			So(cfg.Save("tmp/saved.conf"), ShouldBeNil)
+			reloaded := NewConfig()
+			So(reloaded.Load("tmp/saved.conf"), ShouldBeNil)
+			So(reloaded.Vars, ShouldResemble, cfg.Vars)
+			So(reloaded.Lines, ShouldResemble, cfg.Lines)
 		})
 	})
 }

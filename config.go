@@ -1,3 +1,8 @@
+// `shlike` implements a flexible configuration file format, based on
+// POSIX `/bin/sh` word splitting, quoting, and expansion. See the
+// README.md file (https://github.com/3ofcoins/shlike/) for description
+// of the configuration syntax, and GoDoc
+// (https://godoc.org/pkg/github.com/3ofcoins/shlike/) for API details.
 package shlike
 
 import "fmt"
@@ -5,92 +10,49 @@ import "io/ioutil"
 import "sort"
 import "strings"
 
-// A configuration object. Can load multiple files, evaluate
-// configuration strings, hold variables, and execute dot-directives
-// during evaluation.
-type Config struct {
-	variables map[string][]string
-	lines     [][]string
-	dot       map[string]DotCommand
+// A configuration object interface. Can accept variables,
+// dot-commands, and parsed lines from lexer, and exposes them to end
+// user.
+type Config interface {
+	ReceiveLine(words []string)           // Receive a config line from lexer
+	Set(name string, values ...string)    // Set variable
+	Append(name string, values ...string) // Append to variable
+	Get(name string) []string             // Get variable's value
+	Unset(name string)                    // Unset variable
+	Variables() []string                  // List of variable names
+	Length() int                          // Number of config lines
+	Line(number int) []string             // A single line
+	Iter() <-chan []string                // Iterator over lines
 }
 
-// Returns new empty config object
-func NewConfig() *Config {
-	rv := &Config{map[string][]string{}, [][]string{}, map[string]DotCommand{}}
-	for name, handler := range DotCommands {
-		rv.dot[name] = handler
-	}
-	return rv
+// Evaluates configuration string `source` into `cfg`. Wrapped by Convenience.Eval()
+func EvalInto(cfg Config, source string) error {
+	return newLexer(cfg, "(eval)", source).parse()
 }
 
-// Returns contents as string, escaped as a loadable config, fully
-// expanded and stripped of comments.
-//
-// BUG: if a single-character variable has been set from code, it will
-// be serialized, but won't be loaded correctly.
-func (c *Config) String() string {
-	pieces := make([]string, 0, len(c.variables)+len(c.lines))
-
-	for n, v := range c.variables {
-		pieces = append(pieces, fmt.Sprintf("%s = %s", n, EscapeLine(v)))
-	}
-
-	// Sort variables alphabetically
-	sort.Strings(pieces)
-
-	for _, ln := range c.lines {
-		pieces = append(pieces, EscapeLine(ln))
-	}
-	return strings.Join(pieces, "\n")
-}
-
-func (c *Config) Set(name string, values ...string) {
-	if values == nil {
-		values = []string{}
-	}
-	c.variables[name] = values
-}
-
-func (c *Config) Append(name string, values ...string) {
-	c.variables[name] = append(c.variables[name], values...)
-}
-
-func (c *Config) Get(name string) []string {
-	return c.variables[name]
-}
-
-func (c *Config) Unset(name string) {
-	delete(c.variables, name)
-}
-
-func (c *Config) addLine(words []string) {
-	c.lines = append(c.lines, words)
-}
-
-func (c *Config) lexer(name, data string) *lexer {
-	return &lexer{Config: c, name: name, data: data}
-}
-
-func (c *Config) eval(name, data string) error {
-	return c.lexer(name, data).parse()
-}
-
-func (c *Config) Eval(config string) error {
-	return c.eval("(eval)", config)
-}
-
-func (c *Config) Load(path string) error {
+// Loads configuration file at `path` into `cfg`. Wrapped by Convenience.Load()
+func LoadInto(cfg Config, path string) error {
 	config, err := ioutil.ReadFile(path)
 	if err != nil {
 		return err
 	}
-	return c.eval(path, string(config))
+	return newLexer(cfg, path, string(config)).parse()
 }
 
-func (c *Config) Dot(name string, cmd DotCommand) {
-	if cmd == nil {
-		delete(c.dot, name)
-	} else {
-		c.dot[name] = cmd
+// Returns config serialized as an `EvalInto`-able configuration
+// string. Wrapped by Convenience.Serialize()
+func Serialize(c Config) string {
+	vars := c.Variables()
+	sort.Strings(vars)
+
+	pieces := make([]string, 0, len(vars)+c.Length())
+
+	for _, v := range vars {
+		pieces = append(pieces, fmt.Sprintf("%s = %s", v, EscapeLine(c.Get(v))))
 	}
+
+	for ln := range c.Iter() {
+		pieces = append(pieces, EscapeLine(ln))
+	}
+	return strings.Join(pieces, "\n")
 }

@@ -23,11 +23,7 @@ var rxBackslash = regexp.MustCompile(`^\\(\r?\n|.)`)
 func lexBackslashByRx(l *lexer, region string, pos []int) lexFn {
 	val := region[pos[0]:pos[1]]
 	if val[len(val)-1] == '\n' {
-		// Double-quoted escaped newline is discarded (interpreted as
-		// empty string). Otherwise, it's a white space (word separator).
-		if !l.dquo {
-			l.endWord()
-		}
+		// Escaped newline is discarded
 	} else {
 		l.addText(val)
 	}
@@ -96,12 +92,12 @@ func lexEOLByRx(l *lexer, _ string, _ []int) lexFn {
 }
 
 var lexBOL lexFn
-var rxBOL = regexp.MustCompile(`^\s*(?:([_\pL][_\pL\pN]*)[\t\v\f ]*([?+]?)=[\t\v\f ]*|\.([a-zA-Z_][a-zA-Z0-9_]+)[\t\v\f ]*)?`)
+var rxBOL = regexp.MustCompile(`^\s*(?:([_\pL][_\pL\pN]*)[\t\v\f ]*([?+]?)=[\t\v\f ]*|(\.)[\t\v\f ]+)?`)
 
 func lexBOLByRx(l *lexer, region string, pos []int) lexFn {
 	if pos[0] >= 0 {
 		// Assignment
-		l.opName = region[pos[0]:pos[1]]
+		l.target = region[pos[0]:pos[1]]
 		l.op = opSet
 		switch region[pos[2]:pos[3]] {
 		case "+":
@@ -110,8 +106,7 @@ func lexBOLByRx(l *lexer, region string, pos []int) lexFn {
 			l.op = opSetIfUnset
 		}
 	} else if pos[4] >= 0 {
-		l.op = opDotCommand
-		l.opName = region[pos[4]:pos[5]]
+		l.op = opDot
 	}
 	return lexDispatch
 }

@@ -1,23 +1,14 @@
-// Syntax
-//
-// Lexer implementation is heavily inspired by Go's own template lexer,
-// as described in https://cuddle.googlecode.com/hg/talk/lex.html
 package shlike
 
 import "fmt"
 import "os"
+import "path/filepath"
 import "regexp"
 import "strings"
 import "unicode/utf8"
 
-type tkKind int
-
-const (
-	tkText tkKind = iota
-	tkSpace
-	tkEOL
-	tkVariableReference
-)
+// Lexer implementation is heavily inspired by Go's own template lexer,
+// as described in https://cuddle.googlecode.com/hg/talk/lex.html
 
 type opKind int
 
@@ -26,21 +17,25 @@ const (
 	opSet
 	opAppend
 	opSetIfUnset
-	opDotCommand
+	opDot
 )
 
 const eof = -1
 
 type lexer struct {
-	*Config
+	Config
 	name                  string
 	data                  string
 	start, pos, width, ln int
 	welt, line            []string
 	dquo                  bool
 	err                   error
-	opName                string
+	target                string
 	op                    opKind
+}
+
+func newLexer(c Config, name, data string) *lexer {
+	return &lexer{Config: c, name: name, data: data}
 }
 
 func (l *lexer) parse() error {
@@ -87,13 +82,22 @@ func (l *lexer) endWord() {
 }
 
 func (l *lexer) expandReference(vref string) {
-	val := l.Get(vref)
+	var name, glue string
+
+	if splut := strings.SplitN(vref, "|", 2); len(splut) == 1 {
+		name = vref
+		glue = " "
+	} else {
+		name = splut[0]
+		glue = splut[1]
+	}
+	val := l.Get(name)
 	if val == nil {
 		l.warnf("Undefined variable %#v", vref)
 		return
 	}
 	if l.dquo {
-		l.welt = append(l.welt, strings.Join(val, " "))
+		l.welt = append(l.welt, strings.Join(val, glue))
 	} else {
 		l.endWord()
 		l.line = append(l.line, val...)
@@ -105,26 +109,31 @@ func (l *lexer) endLine() {
 	switch l.op {
 	case opLine:
 		if len(l.line) > 0 {
-			l.addLine(l.line)
+			l.ReceiveLine(l.line)
 		}
 	case opSet:
-		l.Set(l.opName, l.line...)
+		l.Set(l.target, l.line...)
 	case opAppend:
-		l.Append(l.opName, l.line...)
+		l.Append(l.target, l.line...)
 	case opSetIfUnset:
-		if l.Get(l.opName) == nil {
-			l.Set(l.opName, l.line...)
+		if l.Get(l.target) == nil {
+			l.Set(l.target, l.line...)
 		}
-	case opDotCommand:
-		if dot := l.dot[l.opName]; dot == nil {
-			l.errf("Unknown command .%s", l.opName)
+	case opDot:
+		if len(l.line) != 1 {
+			l.errf("The dot accepts exactly one word as a parameter, not %d", len(l.line))
 		} else {
-			l.err = dot(l.Config, l.line...)
+			path := l.line[0]
+			if !filepath.IsAbs(path) {
+				// Relative path is relative to current file
+				path = filepath.Join(filepath.Dir(l.name), path)
+			}
+			l.err = LoadInto(l.Config, path)
 		}
 	default:
-		panic(fmt.Sprintf("Unrecognized op %d(%s)", l.op, l.opName))
+		panic(fmt.Sprintf("Unrecognized op %d (called with %#v)", l.op, l.target))
 	}
-	l.opName = ""
+	l.target = ""
 	l.op = opLine
 	l.line = nil
 	l.ln = 0
