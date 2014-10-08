@@ -47,12 +47,8 @@ type lexer struct {
 	assignBy              asgmtKind
 }
 
-func newLexer(cfg *Config, name, data string) *lexer {
-	return &lexer{Config: cfg, name: name, data: data}
-}
-
 func (l *lexer) parse() error {
-	for state := lexNewLine; state != nil; {
+	for state := lexBOL; state != nil; {
 		state = state(l)
 	}
 	return l.err
@@ -136,65 +132,12 @@ func (l *lexer) endLine() {
 	l.assignBy = asgmtNone
 }
 
-func (l *lexer) doEmit(tk tkKind, start, pos int, text string) {
-	if text == "" {
-		text = l.data[start:pos]
-	}
-	// fmt.Printf("%s:\t%d\t%#v\n", l.debugPrefix(start, pos), tk, text)
-	switch tk {
-	case tkText:
-		l.addText(text)
-	case tkVariableReference:
-		l.expandReference(text)
-	case tkSpace:
-		l.endWord()
-	case tkEOL:
-		l.endLine()
-	default:
-		fmt.Fprintf(os.Stderr, "%s: Unknown token %d: %#v\n", l.debugPrefix(start, pos), tk, text)
-	}
-}
-
 func (l *lexer) errf(format string, args ...interface{}) {
 	l.err = fmt.Errorf("%s: %s", l.debugPrefix(l.start, l.pos), fmt.Sprintf(format, args...))
 }
 
 func (l *lexer) warnf(format string, args ...interface{}) {
 	fmt.Fprintf(os.Stderr, "%s: WARNING: %s\n", l.debugPrefix(l.start, l.pos), fmt.Sprintf(format, args...))
-}
-
-func (l *lexer) substring(start, end int) string {
-	regw := l.pos - l.start
-	if start < 0 {
-		start = 0
-	}
-	if start > regw {
-		start = regw
-	}
-	if end < 0 || end > regw {
-		end = regw
-	}
-	return l.data[l.start+start : l.start+end]
-}
-
-func (l *lexer) emit(tk tkKind) {
-	l.doEmit(tk, l.start, l.pos, "")
-	l.start = l.pos
-}
-
-func (l *lexer) emitSubstring(tk tkKind, start, end int) {
-	regw := l.pos - l.start
-	if start < 0 {
-		start = 0
-	}
-	if end < 0 {
-		end = regw
-	}
-	if start > regw || end > regw {
-		l.errf("Substring %d:%d outside %d chars wide region %d:%d", start, end, regw, l.start, l.pos)
-	}
-	l.doEmit(tk, l.start+start, l.start+end, "")
-	l.start = l.pos
 }
 
 func (l *lexer) decodeNextRune() (rune, int) {
@@ -209,22 +152,6 @@ func (l *lexer) next() rune {
 	l.pos += w
 	l.width = w
 	return r
-}
-
-func (l *lexer) back() {
-	if l.pos -= l.width; l.pos < 0 {
-		l.pos = 0
-	}
-}
-
-func (l *lexer) forth() {
-	l.pos += l.width
-}
-
-// Fast-forwards position by `length`
-func (l *lexer) ff(length int) {
-	l.pos += length
-	l.width = length
 }
 
 // Rewinds `pos` back to `start`
@@ -254,22 +181,13 @@ func (l *lexer) match(rx *regexp.Regexp) []int {
 	}
 }
 
-// Try to match at start of current token rather than current
-// position. This is same as calling l.rew() before l.match(), but it
-// will keep pos/width if not matched.
-func (l *lexer) matchStart(rx *regexp.Regexp) []int {
-	savedPos := l.pos
-	savedWidth := l.width
-	l.rew()
-	if rv := l.match(rx); rv == nil {
-		l.pos = savedPos
-		l.width = savedWidth
-		return nil
-	} else {
-		return rv
-	}
-}
-
 func (l *lexer) discard() {
 	l.start = l.pos
+	l.width = 0
+}
+
+func (l *lexer) consume() (region string) {
+	region = l.data[l.start:l.pos]
+	l.discard()
+	return
 }

@@ -62,8 +62,12 @@ func (c *Config) addLine(words []string) {
 	c.lines = append(c.lines, words)
 }
 
+func (c *Config) lexer(name, data string) *lexer {
+	return &lexer{Config: c, name: name, data: data}
+}
+
 func (c *Config) eval(name, data string) error {
-	return newLexer(c, name, data).parse()
+	return c.lexer(name, data).parse()
 }
 
 func (c *Config) Eval(config string) error {

@@ -109,5 +109,10 @@ QUUX = Quux
 		Convey("Undefined variable warnings", func() {
 			So(stderrFor(func() { c.Eval("$undef") }), ShouldEndWith, "WARNING: Undefined variable \"undef\"\n")
 		})
+
+		Convey("Debug function (for full coverage)", func() {
+			l := c.lexer("", "")
+			So(stderrFor(func() { l.debug("foo") }), ShouldContainSubstring, "foo")
+		})
 	})
 }

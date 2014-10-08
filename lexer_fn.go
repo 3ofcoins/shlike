@@ -5,108 +5,116 @@ import "unicode"
 
 type lexFn func(*lexer) lexFn
 
-var rxComment = regexp.MustCompile(`(?s)^#[^\n]*(\r?\n)*`)
-
-func lexComment(l *lexer) lexFn {
-	if l.matchStart(rxComment) == nil {
-		l.errf("CAN'T HAPPEN in comment")
-		return nil
-	}
-	return lexNewLine
-}
-
-func lexBackslash(l *lexer) lexFn {
-	l.discard() // drop the actual backslash character
-	switch r := l.next(); {
-	case r == '\r' && l.peek() == '\n':
-		l.next()
-		fallthrough
-	case r == '\n':
-		if l.dquo {
-			// escaped newline in double quotes is discarded
-			l.discard()
+func lexByRx(name string, rx *regexp.Regexp, inner func(*lexer, string, []int) lexFn) lexFn {
+	return func(l *lexer) lexFn {
+		l.rew()
+		if pos := l.match(rx); pos == nil {
+			l.errf("Invalid %s", name)
+			return nil
 		} else {
-			l.emit(tkSpace)
+			return inner(l, l.consume(), pos)
 		}
-	default:
-		l.emit(tkText)
 	}
-	return lexNewToken
 }
 
+var lexBackslash lexFn
+var rxBackslash = regexp.MustCompile(`^\\(\r?\n|.)`)
+
+func lexBackslashByRx(l *lexer, region string, pos []int) lexFn {
+	val := region[pos[0]:pos[1]]
+	if val[len(val)-1] == '\n' {
+		// Double-quoted escaped newline is discarded (interpreted as
+		// empty string). Otherwise, it's a white space (word separator).
+		if !l.dquo {
+			l.endWord()
+		}
+	} else {
+		l.addText(val)
+	}
+	return lexDispatch
+}
+
+var lexWhiteSpace lexFn
 var rxWhiteSpace = regexp.MustCompile(`^([\t\f ]|\\\r?\n)+`)
 
-func lexWhiteSpace(l *lexer) lexFn {
-	if l.matchStart(rxWhiteSpace) == nil {
-		l.errf("Invalid white space")
-		return nil
-	}
-	l.emit(tkSpace)
-	return lexNewToken
+func lexWhiteSpaceByRx(l *lexer, _ string, _ []int) lexFn {
+	l.endWord()
+	return lexDispatch
 }
 
+var lexSingleQuoted lexFn
 var rxSingleQuoted = regexp.MustCompile(`(?s)^'([^']*)'`)
 
-func lexSingleQuoted(l *lexer) lexFn {
-	if pos := l.matchStart(rxSingleQuoted); pos == nil {
-		l.errf("Invalid single quoted string")
-		return nil
-	} else {
-		l.emitSubstring(tkText, pos[0], pos[1])
-		return lexNewToken
-	}
+func lexSingleQuotedByRx(l *lexer, region string, pos []int) lexFn {
+	l.addText(region[pos[0]:pos[1]])
+	return lexDispatch
 }
 
 func lexDoubleQuote(l *lexer) lexFn {
+	l.next()
 	if !l.dquo && l.peek() == '"' {
-		// Empty double quotes are a special case
+		// Empty double quotes shortcut
 		l.next()
 		l.discard()
 		l.addText("")
-		return lexNewToken
+		return lexDispatch
 	}
 	// Just toggles inside-double-quotes status
 	l.discard()
 	l.dquo = !l.dquo
-	return lexNewToken
+	return lexDispatch
 }
 
+var lexVariableReference lexFn
 var rxVariableReference = regexp.MustCompile(`^\$([-0-9#!$%&*+,.:;<=>?@^_/|~]|[_\pL][_\pL\pN]*|{((?s).*?)})`)
 
-func lexVariableReference(l *lexer) lexFn {
-	pos := l.matchStart(rxVariableReference)
-	if pos == nil {
-		l.errf("Invalid variable reference")
-		return nil
-	}
+func lexVariableReferenceByRx(l *lexer, region string, pos []int) lexFn {
 	if pos[2] < 0 {
-		l.emitSubstring(tkVariableReference, pos[0], pos[1])
+		l.expandReference(region[pos[0]:pos[1]])
 	} else {
-		l.emitSubstring(tkVariableReference, pos[2], pos[3])
+		l.expandReference(region[pos[2]:pos[3]])
 	}
-	return lexNewToken
+	return lexDispatch
 }
 
+var lexText, lexTextDquo lexFn
 var rxText = regexp.MustCompile(`^[^\\'"$#[:space:]]+`)
 var rxTextDquo = regexp.MustCompile(`^[^\\"$]+`)
 
-func lexText(l *lexer) lexFn {
-	var rx *regexp.Regexp
-	if l.dquo {
-		rx = rxTextDquo
-	} else {
-		rx = rxText
-	}
-	if l.matchStart(rx) == nil {
-		l.errf("Invalid text?")
-		return nil
-	}
-	l.emit(tkText)
-	return lexNewToken
+func lexTextByRx(l *lexer, region string, _ []int) lexFn {
+	l.addText(region)
+	return lexDispatch
 }
 
-func lexNewToken(l *lexer) lexFn {
-	r := l.next()
+var lexLineBreak, lexComment lexFn
+var rxLineBreak = regexp.MustCompile(`^(\r?\n)+`)
+var rxComment = regexp.MustCompile(`(?s)^#[^\n]*(?:\r?\n)*`)
+
+func lexEOLByRx(l *lexer, _ string, _ []int) lexFn {
+	l.endLine()
+	return lexBOL
+}
+
+var lexBOL lexFn
+var rxBOL = regexp.MustCompile(`^\s*(?:([_\pL][_\pL\pN]*)[\t\v\f ]*([?+]?)=[\t\v\f ]*)?`)
+
+func lexBOLByRx(l *lexer, region string, pos []int) lexFn {
+	if pos[0] >= 0 {
+		// Assignment
+		l.assignTo = region[pos[0]:pos[1]]
+		l.assignBy = asgmtOverwrite
+		switch region[pos[2]:pos[3]] {
+		case "+":
+			l.assignBy = asgmtAppend
+		case "?":
+			l.assignBy = asgmtKeep
+		}
+	}
+	return lexDispatch
+}
+
+func lexDispatch(l *lexer) lexFn {
+	r := l.peek()
 	if l.dquo {
 		// inside double-quoted string
 		switch r {
@@ -120,7 +128,7 @@ func lexNewToken(l *lexer) lexFn {
 			l.errf("Unclosed double quoted string")
 			return nil
 		default:
-			return lexText
+			return lexTextDquo
 		}
 	} else {
 		// not inside double-quoted string
@@ -149,38 +157,20 @@ func lexNewToken(l *lexer) lexFn {
 	}
 }
 
-var rxLineBreak = regexp.MustCompile(`^(\r?\n)+`)
-
-func lexLineBreak(l *lexer) lexFn {
-	if l.matchStart(rxLineBreak) == nil {
-		l.errf("Invalid newline, probably runaway line feed character.")
-		return nil
-	}
-	return lexNewLine
-}
-
-var rxNewLineWhitespace = regexp.MustCompile(`^\s*`)
-var rxNewLineAssignment = regexp.MustCompile(`^([_\pL][_\pL\pN]*)[\t\v\f ]*([:?+]?)=[\t\v\f ]*`)
-
-func lexNewLine(l *lexer) lexFn {
-	l.emit(tkEOL)
-	l.matchStart(rxNewLineWhitespace)
-	l.discard()
-	if pos := l.matchStart(rxNewLineAssignment); pos != nil {
-		l.assignTo = l.substring(pos[0], pos[1])
-		l.assignBy = asgmtOverwrite
-		switch l.substring(pos[2], pos[3]) {
-		case "+":
-			l.assignBy = asgmtAppend
-		case "?":
-			l.assignBy = asgmtKeep
-		}
-		l.discard()
-	}
-	return lexNewToken
-}
-
 func lexEOF(l *lexer) lexFn {
-	l.emit(tkEOL)
+	l.discard()
+	l.endLine()
 	return nil
+}
+
+func init() {
+	lexBackslash = lexByRx("backslash escape", rxBackslash, lexBackslashByRx)
+	lexWhiteSpace = lexByRx("whitespace", rxWhiteSpace, lexWhiteSpaceByRx)
+	lexSingleQuoted = lexByRx("single quoted string", rxSingleQuoted, lexSingleQuotedByRx)
+	lexVariableReference = lexByRx("variable reference", rxVariableReference, lexVariableReferenceByRx)
+	lexText = lexByRx("bare text", rxText, lexTextByRx)
+	lexTextDquo = lexByRx("double quoted text", rxTextDquo, lexTextByRx)
+	lexLineBreak = lexByRx("line break", rxLineBreak, lexEOLByRx)
+	lexComment = lexByRx("comment", rxComment, lexEOLByRx)
+	lexBOL = lexByRx("new line", rxBOL, lexBOLByRx)
 }
