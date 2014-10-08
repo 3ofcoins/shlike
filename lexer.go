@@ -19,17 +19,17 @@ const (
 	tkVariableReference
 )
 
-type asgmtKind int
+type opKind int
 
 const (
-	asgmtNone asgmtKind = iota
-	asgmtOverwrite
-	asgmtAppend
-	asgmtKeep
+	opLine opKind = iota
+	opSet
+	opAppend
+	opSetIfUnset
 )
 
-type asgmt struct {
-	kind asgmtKind
+type op struct {
+	kind opKind
 	name string
 }
 
@@ -43,8 +43,8 @@ type lexer struct {
 	welt, line            []string
 	dquo                  bool
 	err                   error
-	assignTo              string
-	assignBy              asgmtKind
+	opName                string
+	op                    opKind
 }
 
 func (l *lexer) parse() error {
@@ -106,30 +106,24 @@ func (l *lexer) expandReference(vref string) {
 
 func (l *lexer) endLine() {
 	l.endWord()
-	if l.assignBy != asgmtNone {
-		if l.Get(l.assignTo) != nil {
-			switch l.assignBy {
-			case asgmtOverwrite:
-				l.Set(l.assignTo, l.line...)
-			case asgmtAppend:
-				l.Append(l.assignTo, l.line...)
-			case asgmtKeep:
-				// discard values
-			}
-		} else {
-			l.Set(l.assignTo, l.line...)
-		}
-		l.line = nil
-		l.ln = 0
-	} else {
+	switch l.op {
+	case opLine:
 		if len(l.line) > 0 {
 			l.addLine(l.line)
-			l.line = nil
-			l.ln = 0
+		}
+	case opSet:
+		l.Set(l.opName, l.line...)
+	case opAppend:
+		l.Append(l.opName, l.line...)
+	case opSetIfUnset:
+		if l.Get(l.opName) == nil {
+			l.Set(l.opName, l.line...)
 		}
 	}
-	l.assignTo = ""
-	l.assignBy = asgmtNone
+	l.opName = ""
+	l.op = opLine
+	l.line = nil
+	l.ln = 0
 }
 
 func (l *lexer) errf(format string, args ...interface{}) {

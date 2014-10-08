@@ -101,13 +101,13 @@ var rxBOL = regexp.MustCompile(`^\s*(?:([_\pL][_\pL\pN]*)[\t\v\f ]*([?+]?)=[\t\v
 func lexBOLByRx(l *lexer, region string, pos []int) lexFn {
 	if pos[0] >= 0 {
 		// Assignment
-		l.assignTo = region[pos[0]:pos[1]]
-		l.assignBy = asgmtOverwrite
+		l.opName = region[pos[0]:pos[1]]
+		l.op = opSet
 		switch region[pos[2]:pos[3]] {
 		case "+":
-			l.assignBy = asgmtAppend
+			l.op = opAppend
 		case "?":
-			l.assignBy = asgmtKeep
+			l.op = opSetIfUnset
 		}
 	}
 	return lexDispatch

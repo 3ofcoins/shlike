@@ -10,7 +10,6 @@ func Escape(str string) string {
 	} else {
 		return "'" + strings.Replace(str, "'", "'\\''", -1) + "'"
 	}
-
 }
 
 // Returns a string containing `strs` as a line of escaped words
